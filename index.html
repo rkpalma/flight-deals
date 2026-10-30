@@ -38,6 +38,8 @@
   body.dark .leaflet-bar a { background:#161b22; color:#e6edf3; border-color:#30363d; }
   body.dark .leaflet-control-layers { background:#161b22; color:#e6edf3; }
   body.dark .leaflet-tooltip { background:#161b22; color:#e6edf3; border-color:#30363d; }
+  body.dark #map { background:#0b0e13; }
+  body.dark .osm-tiles { filter:invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%); }
   .legend .dot { display:inline-block; border-radius:50%; margin-right:6px; vertical-align:middle; }
   .popup-deal { margin:4px 0; }
   .controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:12px 0; }
@@ -366,20 +368,9 @@
     return;
   }
   var map = L.map('map', { worldCopyJump: true });
-  var baseOsm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '&copy; OpenStreetMap contributors' });
-  var baseLight = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors &copy; CARTO' });
-  var baseDark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors &copy; CARTO' });
-  var startDark = document.body.classList.contains('dark');
-  var currentBase = startDark ? baseDark : baseOsm;
-  currentBase.addTo(map);
-  map.on('baselayerchange', function (e) { currentBase = e.layer; });
-  onThemeChange = function (on) {
-    var target = on ? baseDark : baseOsm;
-    if (target === currentBase) return;
-    map.removeLayer(currentBase);
-    target.addTo(map);
-    currentBase = target;
-  };
+  var baseOsm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, className: 'osm-tiles', attribution: '&copy; OpenStreetMap contributors' });
+  var baseSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 18, attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics' });
+  baseOsm.addTo(map);
   var origin = DATA.origin;
   function tier(below) {
     if (below >= 500) return { r: 12, c: '#14532d' };
@@ -446,7 +437,7 @@
   fitToResults = function () { if (lastBounds.length > 1) map.flyToBounds(lastBounds, { padding: [25, 25], duration: 0.8 }); };
   markersLayer.addTo(map);
   L.control.layers(
-    { 'OpenStreetMap': baseOsm, 'Light (CARTO)': baseLight, 'Dark (CARTO)': baseDark },
+    { 'OpenStreetMap': baseOsm, 'Satellite (Esri)': baseSat },
     { 'Deal markers': markersLayer, 'Routes from Winnipeg': routesLayer }
   ).addTo(map);
   updateMap();
