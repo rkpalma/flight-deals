@@ -89,6 +89,7 @@
     <label for="flyto">Fly to:</label>
     <select id="flyto"><option value="">Choose a destination...</option></select>
     <button class="btn" id="fsbtn">Fullscreen map</button>
+    <button class="btn" id="fitbtn">Fit map to results</button>
   </div>
   <div id="mapwrap"><div id="map"></div></div>
   <div class="mapnote" id="mapnote"></div>
@@ -234,6 +235,8 @@
   var tbody = document.querySelector('#deals tbody');
   var cardsWrap = document.getElementById('cardswrap');
   var current = [];
+  var updateMap = function () {};
+  var fitToResults = null;
 
   function badges(d) {
     return (d.isNew ? '<span class="new">NEW</span>' : '') + (d.isLowest ? '<span class="lowest">LOWEST SEEN</span>' : '');
@@ -268,14 +271,17 @@
     }).join('');
     document.getElementById('tablewrap').style.display = state.view === 'table' ? 'block' : 'none';
     cardsWrap.style.display = state.view === 'cards' ? 'grid' : 'none';
+    updateMap();
   }
 
   document.getElementById('filter').addEventListener('input', function () { state.q = this.value.toLowerCase(); render(); });
-  regionSel.addEventListener('change', function () { state.region = this.value; render(); });
-  monthSel.addEventListener('change', function () { state.month = this.value; render(); });
+  regionSel.addEventListener('change', function () { state.region = this.value; render(); if (fitToResults) fitToResults(); });
+  monthSel.addEventListener('change', function () { state.month = this.value; render(); if (fitToResults) fitToResults(); });
   document.getElementById('sort').addEventListener('change', function () { state.sort = this.value; render(); });
   maxPriceEl.addEventListener('input', function () { state.maxPrice = +this.value; maxPriceOut.textContent = 'up to ' + money(state.maxPrice); render(); });
   minBelowEl.addEventListener('input', function () { state.minBelow = +this.value; minBelowOut.textContent = belowTxt(state.minBelow) + '+'; render(); });
+  maxPriceEl.addEventListener('change', function () { if (fitToResults) fitToResults(); });
+  minBelowEl.addEventListener('change', function () { if (fitToResults) fitToResults(); });
   document.getElementById('viewtoggle').addEventListener('click', function () {
     state.view = state.view === 'table' ? 'cards' : 'table';
     this.textContent = state.view === 'table' ? 'Cards view' : 'Table view';
@@ -307,6 +313,7 @@
         chip.classList.toggle('active', state.chips[name]);
       }
       render();
+      if (fitToResults) fitToResults();
     });
   });
   document.querySelectorAll('#deals th[data-sort]').forEach(function (th) {
@@ -342,7 +349,7 @@
   // ---------- Atlas ----------
   var mapEl = document.getElementById('map');
   var noteEl = document.getElementById('mapnote');
-  noteEl.textContent = 'One marker per destination — bigger, darker dots mean a bigger "below usual" discount. Click a marker to see the deals for that city. A line to Winnipeg appears while the popup is open.' +
+  noteEl.textContent = 'One marker per destination — bigger, darker dots mean a bigger "below usual" discount. Click a marker to see the deals for that city. A line to Winnipeg appears while the popup is open. The filters, sliders and chips below the map also filter these markers and popups.' +
     (DATA.unmapped ? ' ' + DATA.unmapped + ' destination(s) not yet placed on the map.' : '');
   if (typeof L === 'undefined') {
     mapEl.style.height = 'auto';
@@ -365,39 +372,66 @@
   var markersLayer = useCluster ? L.markerClusterGroup() : L.layerGroup();
   var routesLayer = L.layerGroup();
   var markerByName = {};
-  var bounds = [[origin.lat, origin.lon]];
   var activeLine = null;
-  DATA.points.forEach(function (p) {
-    var t = tier(p.maxBelow);
-    bounds.push([p.lat, p.lon]);
-    routesLayer.addLayer(L.polyline([[origin.lat, origin.lon], [p.lat, p.lon]], { color: '#0969da', weight: 1, opacity: 0.35 }));
-    var dealsHtml = p.deals.map(function (d) {
-      var below = d.below != null ? ' — $' + d.below.toLocaleString('en-CA') + ' below usual' : '';
-      var link = d.url ? ' <a href="' + esc(d.url) + '" target="_blank" rel="noopener">Check it</a>' : '';
-      var low = d.isLowest ? ' <strong>(lowest seen)</strong>' : '';
-      return '<div class="popup-deal"><strong>' + money(d.price) + '</strong> · ' + esc(d.dates) + '<br>' + esc(d.airline) + below + low + link + '<br>Status: ' + esc(d.status) + '</div>';
-    }).join('');
-    var marker = L.circleMarker([p.lat, p.lon], { radius: t.r, color: '#fff', weight: 1.5, fillColor: t.c, fillOpacity: 0.9 });
-    marker.bindPopup('<strong>' + esc(p.name) + '</strong>' + dealsHtml, { maxWidth: 320 });
-    var minPrice = Math.min.apply(null, p.deals.map(function (d) { return d.price == null ? 1e12 : d.price; }));
-    marker.bindTooltip(p.name + ' — from ' + money(minPrice === 1e12 ? null : minPrice));
-    marker.on('popupopen', function () {
-      if (activeLine) map.removeLayer(activeLine);
-      activeLine = L.polyline([[origin.lat, origin.lon], [p.lat, p.lon]], { color: '#0969da', weight: 1.5, dashArray: '5 6' }).addTo(map);
-    });
-    marker.on('popupclose', function () { if (activeLine) { map.removeLayer(activeLine); activeLine = null; } });
-    markersLayer.addLayer(marker);
-    markerByName[p.name] = marker;
-  });
+  var lastBounds = [[origin.lat, origin.lon]];
+  var pointByName = {};
+  DATA.points.forEach(function (p) { pointByName[p.name] = p; });
   var originMarker = L.circleMarker([origin.lat, origin.lon], { radius: 8, color: '#111', weight: 2, fillColor: '#f9c74f', fillOpacity: 1 })
     .bindPopup('<strong>Winnipeg (YWG)</strong><br>Origin for every deal.');
-  markersLayer.addLayer(originMarker);
+  var flySel = document.getElementById('flyto');
+
+  updateMap = function () {
+    if (activeLine) { map.removeLayer(activeLine); activeLine = null; }
+    markersLayer.clearLayers();
+    routesLayer.clearLayers();
+    markerByName = {};
+    var visible = {};
+    current.forEach(function (d) { (visible[d.dest] = visible[d.dest] || []).push(d); });
+    var bnds = [[origin.lat, origin.lon]];
+    Object.keys(visible).forEach(function (name) {
+      var p = pointByName[name];
+      if (!p) return;
+      var list = visible[name].slice().sort(function (a, b2) { return (a.price || 1e12) - (b2.price || 1e12); });
+      var maxBelow = 0;
+      list.forEach(function (d) { if ((d.below || 0) > maxBelow) maxBelow = d.below; });
+      var t = tier(maxBelow);
+      bnds.push([p.lat, p.lon]);
+      routesLayer.addLayer(L.polyline([[origin.lat, origin.lon], [p.lat, p.lon]], { color: '#0969da', weight: 1, opacity: 0.35 }));
+      var dealsHtml = list.map(function (d) {
+        var below = d.below != null ? ' — $' + d.below.toLocaleString('en-CA') + ' below usual' : '';
+        var link = d.url ? ' <a href="' + esc(d.url) + '" target="_blank" rel="noopener">Check it</a>' : '';
+        var low = d.isLowest ? ' <strong>(lowest seen)</strong>' : '';
+        return '<div class="popup-deal"><strong>' + money(d.price) + '</strong> · ' + esc(d.dates) + '<br>' + esc(d.airline) + below + low + link + '<br>Status: ' + esc(d.status) + '</div>';
+      }).join('');
+      var marker = L.circleMarker([p.lat, p.lon], { radius: t.r, color: '#fff', weight: 1.5, fillColor: t.c, fillOpacity: 0.9 });
+      marker.bindPopup('<strong>' + esc(p.name) + '</strong>' + dealsHtml, { maxWidth: 320 });
+      var minPrice = Math.min.apply(null, list.map(function (d) { return d.price == null ? 1e12 : d.price; }));
+      marker.bindTooltip(p.name + ' — from ' + money(minPrice === 1e12 ? null : minPrice));
+      marker.on('popupopen', function () {
+        if (activeLine) map.removeLayer(activeLine);
+        activeLine = L.polyline([[origin.lat, origin.lon], [p.lat, p.lon]], { color: '#0969da', weight: 1.5, dashArray: '5 6' }).addTo(map);
+      });
+      marker.on('popupclose', function () { if (activeLine) { map.removeLayer(activeLine); activeLine = null; } });
+      markersLayer.addLayer(marker);
+      markerByName[name] = marker;
+    });
+    markersLayer.addLayer(originMarker);
+    var keep = flySel.value;
+    flySel.innerHTML = '<option value="">Choose a destination...</option>';
+    Object.keys(markerByName).sort().forEach(function (name) {
+      var o = document.createElement('option'); o.value = name; o.textContent = name; flySel.appendChild(o);
+    });
+    flySel.value = markerByName[keep] ? keep : '';
+    lastBounds = bnds;
+  };
+  fitToResults = function () { if (lastBounds.length > 1) map.flyToBounds(lastBounds, { padding: [25, 25], duration: 0.8 }); };
   markersLayer.addTo(map);
   L.control.layers(
     { 'OpenStreetMap': baseOsm, 'Light (CARTO)': baseLight, 'Dark (CARTO)': baseDark },
     { 'Deal markers': markersLayer, 'Routes from Winnipeg': routesLayer }
   ).addTo(map);
-  map.fitBounds(bounds, { padding: [25, 25] });
+  updateMap();
+  map.fitBounds(lastBounds, { padding: [25, 25] });
   var legend = L.control({ position: 'bottomleft' });
   legend.onAdd = function () {
     var div = L.DomUtil.create('div', 'legend');
@@ -409,10 +443,7 @@
     return div;
   };
   legend.addTo(map);
-  var flySel = document.getElementById('flyto');
-  DATA.points.slice().sort(function (a, b) { return a.name.localeCompare(b.name); }).forEach(function (p) {
-    var o = document.createElement('option'); o.value = p.name; o.textContent = p.name; flySel.appendChild(o);
-  });
+  document.getElementById('fitbtn').addEventListener('click', function () { if (fitToResults) fitToResults(); });
   flySel.addEventListener('change', function () {
     var m = markerByName[this.value];
     if (!m) return;
