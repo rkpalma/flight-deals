@@ -448,11 +448,16 @@
     var m = markerByName[this.value];
     if (!m) return;
     var ll = m.getLatLng();
-    map.flyTo(ll, Math.max(map.getZoom(), 5), { duration: 1.2 });
-    setTimeout(function () {
+    var opened = false;
+    function openIt() {
+      if (opened || m.isPopupOpen()) { opened = true; return; }
+      opened = true;
       if (useCluster && markersLayer.zoomToShowLayer) markersLayer.zoomToShowLayer(m, function () { m.openPopup(); });
       else m.openPopup();
-    }, 1300);
+    }
+    map.flyTo(ll, Math.max(map.getZoom(), 6), { duration: 1.0 });
+    map.once('moveend', function () { setTimeout(openIt, 200); });
+    setTimeout(openIt, 2200);
   });
   document.getElementById('fsbtn').addEventListener('click', function () {
     var wrap = document.getElementById('mapwrap');
