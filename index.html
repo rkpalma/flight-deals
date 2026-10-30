@@ -572,8 +572,8 @@
   function poiQuery(cat, lat, lon) {
     var head = '[out:json][timeout:25];';
     if (cat === 'attractions') return head + '(node["tourism"~"^(attraction|museum|gallery|zoo|theme_park|viewpoint|castle)$"](around:20000,' + lat + ',' + lon + ');way["tourism"~"^(attraction|museum|gallery|zoo|theme_park|viewpoint|castle)$"](around:20000,' + lat + ',' + lon + ');node["historic"~"^(castle|monument|memorial|ruins)$"](around:20000,' + lat + ',' + lon + '););out center 150;';
-    if (cat === 'hiking') return head + 'relation["route"~"^(hiking|foot|walking)$"](around:30000,' + lat + ',' + lon + ');out geom 60;';
-    if (cat === 'biking') return head + 'relation["route"~"^(bicycle|mtb)$"](around:30000,' + lat + ',' + lon + ');out geom 60;';
+    if (cat === 'hiking') return head + 'relation["route"~"^(hiking|foot|walking)$"](around:25000,' + lat + ',' + lon + ');out geom 60;';
+    if (cat === 'biking') return head + 'relation["route"~"^(bicycle|mtb)$"](around:25000,' + lat + ',' + lon + ');out geom 60;';
     return head + '(way["piste:type"](around:30000,' + lat + ',' + lon + ');relation["piste:type"](around:30000,' + lat + ',' + lon + ');node["aerialway"="station"](around:30000,' + lat + ',' + lon + '););out geom 250;';
   }
   function poiPopupHtml(name, sub, tags) {
@@ -628,35 +628,57 @@
     });
     return n;
   }
+  var OP_ENDPOINTS = ['https://overpass-api.de/api/interpreter', 'https://lz4.overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter'];
+  var opQueue = Promise.resolve();
+  function overpassFetch(query) {
+    var body = 'data=' + encodeURIComponent(query);
+    function attempt(i) {
+      var ctrl = new AbortController();
+      var timer = setTimeout(function () { ctrl.abort(); }, 45000);
+      return fetch(OP_ENDPOINTS[i % OP_ENDPOINTS.length], { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' }, body: body, signal: ctrl.signal })
+        .then(function (r) { clearTimeout(timer); if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
+        .catch(function (err) {
+          clearTimeout(timer);
+          if (i >= 4) throw err;
+          return new Promise(function (res) { setTimeout(res, 2500 + i * 1500); }).then(function () { return attempt(i + 1); });
+        });
+    }
+    function run() { return attempt(0); }
+    var p = opQueue.then(run, run);
+    opQueue = p.then(function () {}, function () {});
+    return p;
+  }
   function loadPoi(cat) {
     if (!poiAnchor) return;
-    var key = cat + '@' + poiAnchor.key;
+    var anchorKey = poiAnchor.key;
+    var anchorName = poiAnchor.name;
+    var anchorLat = poiAnchor.lat, anchorLon = poiAnchor.lon;
+    var key = cat + '@' + anchorKey;
     var group = poiGroups[cat];
     group.clearLayers();
     if (poiCache[key]) {
       var c = drawPoi(cat, poiCache[key]);
-      poiStatus(POI_LABEL[cat] + ' near ' + poiAnchor.name + ': ' + c + ' found.');
+      poiStatus(POI_LABEL[cat] + ' near ' + anchorName + ': ' + c + ' found.');
       return;
     }
-    poiStatus('Loading ' + POI_LABEL[cat].toLowerCase() + ' near ' + poiAnchor.name + '...');
-    var body = 'data=' + encodeURIComponent(poiQuery(cat, poiAnchor.lat, poiAnchor.lon));
-    var endpoints = ['https://overpass-api.de/api/interpreter', 'https://lz4.overpass-api.de/api/interpreter'];
-    function tryEndpoint(i) {
-      return fetch(endpoints[i], { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' }, body: body })
-        .then(function (r) { if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
-        .catch(function (err) { if (i + 1 < endpoints.length) return tryEndpoint(i + 1); throw err; });
-    }
-    tryEndpoint(0)
+    poiStatus('Loading ' + POI_LABEL[cat].toLowerCase() + ' near ' + anchorName + ' (retries automatically if the service is busy)...');
+    overpassFetch(poiQuery(cat, anchorLat, anchorLon))
       .then(function (data) {
         poiCache[key] = data;
-        if (!poiEnabled[cat]) return;
+        if (!poiEnabled[cat] || !poiAnchor || poiAnchor.key !== anchorKey) return;
         var n = drawPoi(cat, data);
-        poiStatus(POI_LABEL[cat] + ' near ' + poiAnchor.name + ': ' + n + ' found.');
+        poiStatus(POI_LABEL[cat] + ' near ' + anchorName + ': ' + n + ' found.');
       })
-      .catch(function () { poiStatus('Could not load ' + POI_LABEL[cat].toLowerCase() + ' — the POI service is busy or unreachable. Try toggling the layer off and on.'); });
+      .catch(function () {
+        if (poiAnchor && poiAnchor.key === anchorKey) poiStatus('Could not load ' + POI_LABEL[cat].toLowerCase() + ' near ' + anchorName + ' — the POI service stayed busy after several retries. Give it a minute, then toggle the layer off and on.');
+      });
   }
+  var poiDebounce = null;
   function refreshPoi() {
-    Object.keys(poiEnabled).forEach(function (cat) { if (poiEnabled[cat]) loadPoi(cat); });
+    if (poiDebounce) clearTimeout(poiDebounce);
+    poiDebounce = setTimeout(function () {
+      Object.keys(poiEnabled).forEach(function (cat) { if (poiEnabled[cat]) loadPoi(cat); });
+    }, 350);
   }
   function setPoiAnchor(lat, lon, name) {
     var key = lat.toFixed(3) + ',' + lon.toFixed(3);
