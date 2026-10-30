@@ -70,6 +70,9 @@
   body.dark .st-expired { background:#1f2937; color:#9ca3af; }
   .st-unknown { color:var(--muted); }
   tbody tr.expired td { opacity:.5; }
+  tbody tr.selected td { background:#dceafe; }
+  body.dark tbody tr.selected td { background:#173a5e; }
+  .selwrap { font-size:13px; color:var(--muted); display:flex; align-items:center; gap:4px; cursor:pointer; }
   a { color:var(--accent); }
   .cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px; }
   .deal-card { border:1px solid var(--border); border-radius:12px; padding:14px; background:var(--card); display:flex; flex-direction:column; gap:6px; }
@@ -103,6 +106,7 @@
   </div>
   <div id="mapwrap"><div id="map"></div><button id="exitfs">Exit fullscreen</button></div>
   <div class="mapnote" id="mapnote"></div>
+  <div class="mapnote" id="selstatus" style="font-weight:600"></div>
 
   <h2>All deals</h2>
   <div class="controls">
@@ -131,12 +135,14 @@
     <button class="chip" data-chip="lowest">Lowest price seen</button>
     <button class="chip" data-chip="starred">Starred</button>
     <button class="chip" data-chip="hideexpired">Hide expired</button>
+    <button class="chip" id="clearsel" style="display:none">Clear selection</button>
     <button class="chip" data-chip="clear">Clear all filters</button>
   </div>
   <div class="count" id="count"></div>
   <div id="tablewrap">
     <table id="deals">
       <thead><tr>
+        <th><input type="checkbox" id="selall" title="Select all visible rows"></th>
         <th data-sort="destAsc">Destination <span class="arrow"></span></th>
         <th data-sort="priceAsc">Price (CAD) <span class="arrow"></span></th>
         <th data-sort="departAsc">Travel dates <span class="arrow"></span></th>
@@ -170,6 +176,7 @@
   var stars = {};
   try { stars = JSON.parse(localStorage.getItem('fd_stars') || '{}'); } catch (e) { stars = {}; }
   function saveStars() { try { localStorage.setItem('fd_stars', JSON.stringify(stars)); } catch (e) {} }
+  var selected = {};
 
   var state = { q: '', region: '', month: '', maxPrice: DATA.stats.maxPrice, minBelow: 0,
     chips: { nonstop: false, new: false, best: false, lowest: false, starred: false, hideexpired: false },
@@ -263,10 +270,13 @@
 
   function render() {
     current = sortRows(filtered());
-    document.getElementById('count').textContent = 'Showing ' + current.length + ' of ' + deals.length + ' deals.';
+    var selCount = Object.keys(selected).length;
+    document.getElementById('count').textContent = 'Showing ' + current.length + ' of ' + deals.length + ' deals.' +
+      (selCount ? ' ' + selCount + ' row(s) selected — the map shows only the selected deals.' : '');
     document.getElementById('emptybox').style.display = current.length ? 'none' : 'block';
     tbody.innerHTML = current.map(function (d) {
-      return '<tr' + (d.status === 'Expired' ? ' class="expired"' : '') + '><td>' + esc(d.dest) + badges(d) + '</td><td><strong>' + money(d.price) + '</strong></td>' +
+      var cls = ((d.status === 'Expired' ? 'expired' : '') + (selected[d.id] ? ' selected' : '')).trim();
+      return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td><input type="checkbox" class="selrow" data-sel="' + d.id + '"' + (selected[d.id] ? ' checked' : '') + '></td><td>' + esc(d.dest) + badges(d) + '</td><td><strong>' + money(d.price) + '</strong></td>' +
         '<td>' + esc(d.dates) + '</td><td>' + esc(d.airline) + '</td>' +
         '<td><span class="below-pill">' + (d.below != null ? belowTxt(d.below) + ' below' : '—') + '</span></td>' +
         '<td>' + esc(d.rdateFmt) + '</td><td>' + statusPill(d) + '</td><td>' + linkHtml(d) + '</td><td>' + starBtn(d) + '</td></tr>';
@@ -277,10 +287,17 @@
         '<div class="meta">' + esc(d.dates) + '<br>' + esc(d.airline) + '</div>' +
         '<div class="meta">' + (d.below != null ? '<span class="below-pill">' + belowTxt(d.below) + ' below usual</span>' : 'LOW fare') +
         ' · Spotted ' + esc(d.rdateFmt) + ' · ' + statusPill(d) + '</div>' +
-        '<div class="foot">' + linkHtml(d) + starBtn(d) + '</div></div>';
+        '<div class="foot">' + linkHtml(d) + '<label class="selwrap"><input type="checkbox" class="selrow" data-sel="' + d.id + '"' + (selected[d.id] ? ' checked' : '') + '> Select</label>' + starBtn(d) + '</div></div>';
     }).join('');
     document.getElementById('tablewrap').style.display = state.view === 'table' ? 'block' : 'none';
     cardsWrap.style.display = state.view === 'cards' ? 'grid' : 'none';
+    var selAll = document.getElementById('selall');
+    var visSel = current.filter(function (d) { return selected[d.id]; }).length;
+    selAll.checked = current.length > 0 && visSel === current.length;
+    selAll.indeterminate = visSel > 0 && visSel < current.length;
+    var csBtn = document.getElementById('clearsel');
+    csBtn.style.display = selCount ? 'inline-block' : 'none';
+    csBtn.textContent = 'Clear selection (' + selCount + ')';
     updateMap();
   }
 
@@ -308,7 +325,7 @@
     a.href = URL.createObjectURL(blob); a.download = 'flight-deals.csv'; a.click();
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
   });
-  document.querySelectorAll('#chips .chip').forEach(function (chip) {
+  document.querySelectorAll('#chips .chip[data-chip]').forEach(function (chip) {
     chip.addEventListener('click', function () {
       var name = chip.getAttribute('data-chip');
       if (name === 'clear') {
@@ -342,6 +359,32 @@
     if (stars[k]) delete stars[k]; else stars[k] = 1;
     saveStars(); render();
   });
+  document.addEventListener('change', function (e) {
+    var cb = e.target.closest ? e.target.closest('.selrow') : null;
+    if (!cb) return;
+    var id = cb.getAttribute('data-sel');
+    if (cb.checked) selected[id] = 1; else delete selected[id];
+    render();
+    if (fitToResults) fitToResults();
+  });
+  tbody.addEventListener('click', function (e) {
+    if (e.target.closest('a,button,input,label')) return;
+    var tr = e.target.closest('tr');
+    if (!tr) return;
+    var cb = tr.querySelector('.selrow');
+    if (!cb) return;
+    var id = cb.getAttribute('data-sel');
+    if (selected[id]) delete selected[id]; else selected[id] = 1;
+    render();
+    if (fitToResults) fitToResults();
+  });
+  document.getElementById('selall').addEventListener('change', function () {
+    var on = this.checked;
+    current.forEach(function (d) { if (on) selected[d.id] = 1; else delete selected[d.id]; });
+    render();
+    if (fitToResults) fitToResults();
+  });
+  document.getElementById('clearsel').addEventListener('click', function () { selected = {}; render(); });
 
   var darkBtn = document.getElementById('darktoggle');
   var onThemeChange = function () {};
@@ -395,8 +438,17 @@
     markersLayer.clearLayers();
     routesLayer.clearLayers();
     markerByName = {};
+    var selIds = Object.keys(selected);
+    var mapDeals = current;
+    if (selIds.length) {
+      var selSet = {};
+      selIds.forEach(function (k) { selSet[k] = 1; });
+      mapDeals = deals.filter(function (d) { return selSet[d.id]; });
+    }
     var visible = {};
-    current.forEach(function (d) { (visible[d.dest] = visible[d.dest] || []).push(d); });
+    mapDeals.forEach(function (d) { (visible[d.dest] = visible[d.dest] || []).push(d); });
+    var selEl = document.getElementById('selstatus');
+    if (selEl) selEl.textContent = selIds.length ? 'Map is showing only your ' + selIds.length + ' selected deal(s) across ' + Object.keys(visible).length + ' destination(s). Clear the selection to see everything again.' : '';
     var bnds = [[origin.lat, origin.lon]];
     Object.keys(visible).forEach(function (name) {
       var p = pointByName[name];
