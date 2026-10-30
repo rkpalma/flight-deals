@@ -27,7 +27,8 @@
   .stat .l { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
   #mapwrap { position:relative; }
   #map { height:480px; width:100%; border:1px solid var(--border); border-radius:10px; background:#aad3df; z-index:0; }
-  #map:fullscreen { height:100%; border-radius:0; }
+  #mapwrap:fullscreen { width:100%; height:100%; background:#aad3df; }
+  #mapwrap:fullscreen #map { height:100%; width:100%; border:none; border-radius:0; }
   .mapnote { color:var(--muted); font-size:12px; margin-top:6px; }
   .legend { background:#fff; color:#1a1a1a; padding:8px 10px; border:1px solid #bbb; border-radius:6px; font-size:12px; line-height:1.7; }
   .legend .dot { display:inline-block; border-radius:50%; margin-right:6px; vertical-align:middle; }
@@ -464,7 +465,7 @@
     if (document.fullscreenElement) document.exitFullscreen();
     else if (wrap.requestFullscreen) wrap.requestFullscreen();
   });
-  document.addEventListener('fullscreenchange', function () { setTimeout(function () { map.invalidateSize(); }, 200); });
+  document.addEventListener('fullscreenchange', function () { setTimeout(function () { map.invalidateSize(); }, 300); setTimeout(function () { map.invalidateSize(); }, 800); });
 })();
 </script>
 </body>
