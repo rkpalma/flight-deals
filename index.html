@@ -52,7 +52,7 @@
   .count { color:var(--muted); font-size:13px; margin:6px 0 10px; }
   table { border-collapse:collapse; width:100%; font-size:14px; }
   th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
-  th { cursor:pointer; user-select:none; background:var(--card); position:sticky; top:0; }
+  th { cursor:pointer; user-select:none; background:var(--card); position:sticky; top:0; touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
   th .arrow { font-size:10px; color:var(--muted); }
   tbody tr:hover td { background:var(--row-hover); }
   .new { background:var(--green); color:#fff; font-size:10px; font-weight:700; padding:1px 5px; border-radius:4px; margin-left:6px; vertical-align:middle; }
@@ -122,6 +122,10 @@
       <option value="newestDesc">Sort: Newest first</option>
       <option value="departAsc">Sort: Departing soonest</option>
       <option value="destAsc">Sort: Destination A-Z</option>
+      <option value="destDesc">Sort: Destination Z-A</option>
+      <option value="departDesc">Sort: Departing latest</option>
+      <option value="savingAsc">Sort: Smallest saving</option>
+      <option value="newestAsc">Sort: Oldest first</option>
     </select>
     <button class="btn" id="viewtoggle">Cards view</button>
     <button class="btn" id="csvbtn">Download CSV</button>
@@ -246,6 +250,11 @@
       if (s === 'newestDesc') return a.rdate < b.rdate ? 1 : (a.rdate > b.rdate ? -1 : (b.below || 0) - (a.below || 0));
       if (s === 'departAsc') return a.depKey < b.depKey ? -1 : (a.depKey > b.depKey ? 1 : 0);
       if (s === 'destAsc') return a.dest.localeCompare(b.dest);
+      if (s === 'destDesc') return b.dest.localeCompare(a.dest);
+      if (s === 'departDesc') return a.depKey > b.depKey ? -1 : (a.depKey < b.depKey ? 1 : 0);
+      if (s === 'savingAsc') return (a.below || 0) - (b.below || 0);
+      if (s === 'newestAsc') return a.rdate > b.rdate ? 1 : (a.rdate < b.rdate ? -1 : (a.below || 0) - (b.below || 0));
+      if (s === 'savingDesc') return (b.below || 0) - (a.below || 0);
       return (b.below || 0) - (a.below || 0);
     });
     return rows;
@@ -300,6 +309,12 @@
     var csBtn = document.getElementById('clearsel');
     csBtn.style.display = selCount ? 'inline-block' : 'none';
     csBtn.textContent = 'Clear selection (' + selCount + ')';
+    var SORT_COL = { destAsc: 'destAsc', destDesc: 'destAsc', priceAsc: 'priceAsc', priceDesc: 'priceAsc', departAsc: 'departAsc', departDesc: 'departAsc', savingDesc: 'savingDesc', savingAsc: 'savingDesc', newestDesc: 'newestDesc', newestAsc: 'newestDesc' };
+    document.querySelectorAll('#deals th[data-sort]').forEach(function (th) {
+      var a = th.querySelector('.arrow');
+      if (!a) return;
+      a.textContent = SORT_COL[state.sort] === th.getAttribute('data-sort') ? (state.sort.slice(-3) === 'Asc' ? '▲' : '▼') : '↕';
+    });
     updateMap();
   }
 
@@ -345,12 +360,12 @@
       if (fitToResults) fitToResults();
     });
   });
+  var SORT_FLIP = { destAsc: 'destDesc', destDesc: 'destAsc', priceAsc: 'priceDesc', priceDesc: 'priceAsc', departAsc: 'departDesc', departDesc: 'departAsc', savingDesc: 'savingAsc', savingAsc: 'savingDesc', newestDesc: 'newestAsc', newestAsc: 'newestDesc' };
   document.querySelectorAll('#deals th[data-sort]').forEach(function (th) {
     th.addEventListener('click', function () {
       var s = th.getAttribute('data-sort');
-      if (s === 'priceAsc' && state.sort === 'priceAsc') s = 'priceDesc';
-      state.sort = s;
-      document.getElementById('sort').value = s;
+      state.sort = state.sort === s ? SORT_FLIP[s] : s;
+      document.getElementById('sort').value = state.sort;
       render();
     });
   });
