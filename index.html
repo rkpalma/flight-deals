@@ -29,6 +29,8 @@
   #map { height:480px; width:100%; border:1px solid var(--border); border-radius:10px; background:#aad3df; z-index:0; }
   #mapwrap:fullscreen { width:100%; height:100%; background:#aad3df; }
   #mapwrap:fullscreen #map { height:100%; width:100%; border:none; border-radius:0; }
+  #exitfs { display:none; position:absolute; top:12px; right:56px; z-index:1200; background:#fff; color:#1a1a1a; border:1px solid #999; border-radius:8px; padding:8px 14px; font-weight:600; cursor:pointer; box-shadow:0 1px 5px rgba(0,0,0,.4); }
+  #mapwrap:fullscreen #exitfs { display:block; }
   .mapnote { color:var(--muted); font-size:12px; margin-top:6px; }
   .legend { background:#fff; color:#1a1a1a; padding:8px 10px; border:1px solid #bbb; border-radius:6px; font-size:12px; line-height:1.7; }
   .legend .dot { display:inline-block; border-radius:50%; margin-right:6px; vertical-align:middle; }
@@ -92,7 +94,7 @@
     <button class="btn" id="fsbtn">Fullscreen map</button>
     <button class="btn" id="fitbtn">Fit map to results</button>
   </div>
-  <div id="mapwrap"><div id="map"></div></div>
+  <div id="mapwrap"><div id="map"></div><button id="exitfs">Exit fullscreen</button></div>
   <div class="mapnote" id="mapnote"></div>
 
   <h2>All deals</h2>
@@ -445,6 +447,7 @@
   };
   legend.addTo(map);
   document.getElementById('fitbtn').addEventListener('click', function () { if (fitToResults) fitToResults(); });
+  document.getElementById('exitfs').addEventListener('click', function () { if (document.fullscreenElement) document.exitFullscreen(); });
   flySel.addEventListener('change', function () {
     var m = markerByName[this.value];
     if (!m) return;
