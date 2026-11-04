@@ -219,6 +219,7 @@
   var state = { q: '', region: '', month: '', depwin: '', maxPrice: B.stats.maxPrice, minBelow: 0,
     chips: { drops: false, nonstop: false, new: false, best: false, lowest: false, starred: false, hideexpired: false },
     sort: 'savingDesc', view: 'table' };
+  document.getElementById('sort').value = state.sort;
 
   var statsEl = document.getElementById('stats');
   function renderHeader() {
